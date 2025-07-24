@@ -1,7 +1,12 @@
 package filesystem
 
 import (
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha512"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -260,6 +265,31 @@ func (fs *Filesystem) Chown(p string) error {
 
 func (fs *Filesystem) Chmod(path string, mode ufs.FileMode) error {
 	return fs.unixFS.Chmod(path, mode)
+}
+
+func (fs *Filesystem) Hash(path string, algorithm string) (string, error) {
+	file, err := fs.unixFS.Open(path)
+	if err != nil {
+		return "", errors.Wrap(err, "server/filesystem: hash: failed to open file")
+	}
+	defer file.Close()
+
+	var hash hash.Hash
+	switch strings.ToLower(algorithm) {
+	case "md5":
+		hash = md5.New()
+	case "sha1":
+		hash = sha1.New()
+	case "sha512":
+		hash = sha512.New()
+	default:
+		return "", fmt.Errorf("server/filesystem: hash: unsupported hash algorithm %s", algorithm)
+	}
+
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", errors.Wrap(err, "server/filesystem: hash: failed to hash file")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // Begin looping up to 50 times to try and create a unique copy file name. This will take
