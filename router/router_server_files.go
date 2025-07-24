@@ -477,6 +477,66 @@ func postServerDecompressFiles(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+type hashedFile struct {
+	File string `json:"file"`
+	Hash string `json:"hash"`
+}
+
+func postServerHashFiles(c *gin.Context) {
+	s := ExtractServer(c)
+
+	var data struct {
+		Root      string   `json:"root"`
+		Files     []string `json:"files"`
+		Algorithm string   `json:"algorithm"`
+	}
+
+	if err := c.BindJSON(&data); err != nil {
+		return
+	}
+
+	if len(data.Files) == 0 {
+		c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "No files were passed through to be hashed.",
+		})
+		return
+	}
+
+	g, ctx := errgroup.WithContext(c.Request.Context())
+	var hashes []hashedFile
+	
+	for _, p := range data.Files {
+		g.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				filePath := path.Join(data.Root, p)
+				hash, err := s.Filesystem().Hash(filePath, data.Algorithm)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						return nil
+					}
+					return err
+				}
+
+				hashes = append(hashes, hashedFile{
+					File: p,
+					Hash: hash,
+				})
+				return nil
+			}
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		middleware.CaptureAndAbort(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, hashes)
+}
+
 type chmodFile struct {
 	File string `json:"file"`
 	Mode string `json:"mode"`
